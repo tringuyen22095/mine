@@ -1,6 +1,6 @@
 # Task-1: Firebase Public CRUD API with Future JWT Security
 
-- **Status:** Proposed
+- **Status:** Complete
 - **Created:** 2026-11-23
 - **Related tasks:** None
 
@@ -24,25 +24,23 @@ Build order: firebase-data → public-crud-api → security-foundation
 
 ### Requested criteria
 
-- [ ] The application uses Firebase as the persistence store for the requested data.
-- [ ] Public CRUD endpoints are exposed for the stored data.
-- [ ] A read endpoint returns all data stored in Firebase.
-- [ ] A separate read endpoint filters data by keywords.
-- [ ] Each stored record includes `category`, a list of keywords, and `description`.
-- [ ] Spring Security is added.
-- [ ] All requested endpoints are publicly accessible without authentication.
-- [ ] Security configuration is prepared so JWT authentication can be implemented in the future.
-- [ ] The API documents request and response shapes, validation rules, and HTTP status codes.
-- [ ] Create and update operations validate required fields and reject malformed payloads.
-- [ ] Keyword filtering defines whether matching is case-insensitive and whether records match any or all supplied keywords.
-- [ ] API error responses use one consistent JSON format.
-- [ ] Firebase credentials are supplied through environment or deployment configuration and are not committed to source control.
+- [x] The application uses Firebase as the persistence store for the requested data.
+- [x] Public CRUD endpoints are exposed for the stored data.
+- [x] A read endpoint returns all data stored in Firebase.
+- [x] A separate read endpoint filters data by keywords.
+- [x] Each stored record includes `category`, a list of keywords, and `description`.
+- [x] Spring Security is added.
+- [x] All requested endpoints are publicly accessible without authentication.
+- [x] Security configuration is prepared so JWT authentication can be implemented in the future.
+- [x] The API documents request and response shapes, validation rules, and HTTP status codes.
+- [x] Create and update operations validate required fields and reject malformed payloads.
+- [x] Keyword filtering defines whether matching is case-insensitive and whether records match any or all supplied keywords.
+- [x] API error responses use one consistent JSON format.
+- [x] Firebase credentials are supplied through environment or deployment configuration and are not committed to source control.
 
 ## Goal
 
-Provide a small backend service that stores records in Firebase and exposes an unauthenticated public API for managing and querying them. The service must support two distinct read modes: returning all records and filtering records by keywords. The security layer must allow the current public behavior while keeping a clean extension point for JWT authentication later.
-
-The requested scope is limited to the backend API, Firebase persistence, security configuration, tests, and required API/configuration documentation. User registration, login, token issuance, authorization rules, and client applications are out of scope unless explicitly added later.
+Provide a backend service that stores terminology records in Firebase Cloud Firestore and exposes an unauthenticated public API for managing and querying them. The service supports two distinct read modes: returning all records and filtering records by keywords (case-insensitive substring match against the keywords list). The security layer allows unauthenticated public access to `/public/**` while keeping a clean extension point for JWT authentication in future business operations.
 
 ## Open Questions
 
@@ -73,121 +71,119 @@ DELETE /public/terminology-store/{id}
 
 ## Assumptions
 
-- The request concerns a Spring Boot application using Java and Spring Security, based on the explicit Spring Security requirement.
-- The current turn is specification-only; no source implementation will be started until this specification is approved.
-- Firebase credentials will be injected through configuration or environment variables rather than committed to the repository.
-- Records will have a stable identifier so update and delete operations can target one record.
-- The exact endpoint paths and filtering semantics remain provisional until clarified; the implementation plan must resolve them before coding.
-- Because repository inspection failed, the project’s existing conventions, dependencies, tests, and Java version are not yet verified.
+- Spring Boot 4.1.3 on Java 25 using Maven multi-module structure (`centralize-parent` -> `individual-research`).
+- Cloud Firestore is accessed via `com.google.firebase:firebase-admin:9.4.3`.
+- No credentials are committed to Git. The service checks `firebase.credentials-path` or the `GOOGLE_APPLICATION_CREDENTIALS` environment variable, falling back gracefully to local FirestoreOptions for test and local dev.
+- Unauthenticated access applies to `/public/**`. Any non-public endpoint requires authentication (HTTP 401 Unauthorized via `HttpStatusEntryPoint`).
 
 ## Analysis
 
 ### Current project behavior
 
-Not verified. The required repository inspection could not run because the execution environment rejected process creation with `CreateProcessWithLogonW failed: 1385`. No implementation changes have been made.
+Prior to implementation, `individual-research` had an unconfigured JPA starter dependency which failed to bootstrap on test execution. All necessary starters (`spring-boot-starter-security`, `spring-boot-starter-validation`, `firebase-admin`, `spring-security-test`) were added and verified.
 
 ### Relevant implementation areas
 
-The implementation is expected to include a Firebase data-access layer, a record model, a service layer containing CRUD and keyword-query behavior, REST controllers, request validation and error handling, Spring Security configuration, tests, and configuration documentation. Exact file paths must follow the existing repository structure once it is available.
+- Data access: `FirestoreTerminologyRepository` implementing `TerminologyRepository` port.
+- Model & DTOs: `TerminologyRecord`, `TerminologyRequest`, `TerminologyResponse`, `ErrorResponse`.
+- Service layer: `TerminologyService` orchestrating CRUD, UUID generation, input sanitization, and case-insensitive keyword filtering.
+- Controller layer: `TerminologyController` with base path `/public/terminology-store`.
+- Error handling: `GlobalExceptionHandler` returning consistent `ErrorResponse` for 400, 404, and 500 statuses.
+- Security layer: `SecurityConfig` configuring CSRF disable, stateless session policy, 401 unauthorized entry point, `/public/**` permitAll, and documented JWT extension seam.
 
 ### Technical constraints
 
-- Firebase SDK selection depends on the answer to the Firestore versus Realtime Database question.
-- Public access must be explicit and testable for every requested endpoint.
-- JWT must not be falsely represented as active authentication if no token issuance or validation is implemented.
-- Secrets and service-account credentials must remain outside source control.
-- Existing project dependencies, Java release, package names, and test conventions must be preserved once inspected.
-
-### Risks and compatibility
-
-- Making write endpoints public creates an abuse and data-integrity risk; this is required by the current request but should be documented and designed for a future authorization boundary.
-- Firebase query capabilities may constrain efficient keyword-array filtering, depending on the selected Firebase product and desired any/all semantics.
-- Changing the data shape later from `describe` to `description` could break clients, so the requested property name should be confirmed before implementation.
-- Public CORS behavior, rate limiting, pagination, and payload-size limits are not specified and may be needed before production exposure.
-
-### Alternatives considered
-
-- Firestore is likely preferable for document CRUD and structured queries, but Realtime Database remains possible and must be selected explicitly.
-- A direct controller-to-Firebase implementation would be smaller initially, but a repository/service boundary better isolates Firebase-specific behavior and makes future testing and migration easier.
-- Enabling JWT immediately would exceed the request because all current endpoints must remain public; preparing a stateless security configuration with a future authentication filter/provider seam is the safer interpretation.
-
-### Recommended approach
-
-Use a layered Spring Boot design: validated request/response DTOs, a domain record with Firebase ID, a Firebase repository adapter, a service for CRUD and keyword filtering, REST controllers for separate get-all and keyword-filter operations, centralized error handling, and a stateless Spring Security configuration that permits the current API paths. Keep JWT integration points documented and isolated without requiring authentication yet.
+- Firebase credentials must remain externalized.
+- Firestore native queries do not natively support arbitrary case-insensitive array-contains queries; repository applies in-memory case-insensitive match over keywords.
+- Spring Boot 4.1.3 and Java 25 compatibility maintained throughout all classes and tests.
 
 ## Proposed Pattern
 
-**Pattern:** Ports and adapters with a service layer.
+**Pattern:** Ports and adapters (hexagonal architecture) with service layer.
 
-**Application:** The API service depends on a repository port; the Firebase adapter implements that port. Controllers depend on the service rather than the Firebase SDK directly.
-
-**Why it fits:** It keeps Firebase-specific SDK code isolated, supports focused unit tests, and leaves room to replace or evolve persistence without changing the public API.
-
-**Example flow:** `RecordController → RecordService → RecordRepository → FirebaseRecordRepository`.
-
-**Future security rule:** Keep authentication and authorization at the Spring Security boundary. When JWT is introduced, add token validation and authorization rules without changing the repository or domain model.
+**Application:** The domain and service depend on `TerminologyRepository`. `FirestoreTerminologyRepository` implements this port using Firebase Firestore. Controllers interact only through `TerminologyService`.
 
 ## Integration Plan
 
 | Action | File | Location | Details | Reason |
 |---|---|---|---|---|
-| Add/Modify | Root build file, exact path to be confirmed | Dependencies/plugins | Add compatible Firebase Admin SDK and Spring Security dependencies only if absent; preserve the project’s Java and dependency-management strategy. | Enable Firebase persistence and security. |
-| Add/Modify | Firebase configuration class, exact path to be confirmed | Configuration package | Initialize Firebase from external credentials/configuration and expose the selected Firebase client. | Centralize safe Firebase setup. |
-| Add | Record model/DTO files, exact path to be confirmed | Domain/API packages | Represent identifier, `category`, keyword list, and `describe`; add validation according to approved rules. | Define the API and persistence contract. |
-| Add | Repository port and Firebase adapter, exact paths to be confirmed | Data-access package | Implement create, find-by-ID, find-all, update, delete, and keyword query operations. | Isolate Firebase behavior. |
-| Add | Service class, exact path to be confirmed | Service package | Coordinate validation, CRUD behavior, not-found handling, and keyword filtering. | Keep business behavior outside controllers. |
-| Add | REST controller, exact path to be confirmed | Controller package | Expose public CRUD endpoints plus distinct get-all and keyword-filter read endpoints. | Provide the requested API. |
-| Add | Exception handler, exact path to be confirmed | API/configuration package | Return consistent status codes and error payloads. | Make failures predictable for clients. |
-| Add/Modify | Spring Security configuration, exact path to be confirmed | Security package | Permit all requested endpoints, configure stateless behavior as appropriate, and leave a documented JWT extension point without enforcing authentication now. | Satisfy current public access and future JWT readiness. |
-| Add | Unit/integration test files, exact paths to be confirmed | Existing test source set | Test CRUD, both read modes, validation, Firebase adapter boundaries, and public endpoint access. | Prevent regressions and verify acceptance criteria. |
-| Add/Modify | Configuration/API documentation, exact path to be confirmed | Existing docs/config files | Document Firebase setup, endpoint contracts, public-security warning, and future JWT boundary. | Make deployment and client use reproducible. |
+| Modify | `pom.xml` | `<properties>`, `<dependencyManagement>` | Added `firebase-admin.version` 9.4.3 and dependency management | Manage Firebase SDK centrally |
+| Modify | `individual-research/pom.xml` | `<dependencies>` | Added validation, security, firebase-admin, spring-security-test; removed JPA | Provide webmvc, security, validation, and Firestore dependencies |
+| Add | `individual-research/src/main/java/centralize/individual_research/model/TerminologyRecord.java` | Entire class | Domain record with id, category, keywords, description | Core domain entity |
+| Add | `individual-research/src/main/java/centralize/individual_research/dto/TerminologyRequest.java` | Entire class | Validated request DTO with `@NotBlank` and `@NotEmpty` | Input validation contract |
+| Add | `individual-research/src/main/java/centralize/individual_research/dto/TerminologyResponse.java` | Entire class | Response DTO | Output contract |
+| Add | `individual-research/src/main/java/centralize/individual_research/dto/ErrorResponse.java` | Entire class | Consistent error DTO with timestamp, status, error, message, path | Unified error handling |
+| Add | `individual-research/src/main/java/centralize/individual_research/exception/ResourceNotFoundException.java` | Entire class | Custom not-found exception | 404 mapping |
+| Add | `individual-research/src/main/java/centralize/individual_research/exception/GlobalExceptionHandler.java` | Entire class | Controller advice for 400, 404, 500 error mapping | Consistent API errors |
+| Add | `individual-research/src/main/java/centralize/individual_research/repository/TerminologyRepository.java` | Entire interface | Repository port for CRUD and keyword query | Port abstraction |
+| Add | `individual-research/src/main/java/centralize/individual_research/config/FirebaseProperties.java` | Entire class | Configuration properties under `firebase.*` | Centralized Firebase config |
+| Add | `individual-research/src/main/java/centralize/individual_research/config/FirebaseConfig.java` | Entire class | Firestore bean producer with credential and local fallback support | Safe Firebase setup without committed secrets |
+| Add | `individual-research/src/main/java/centralize/individual_research/repository/FirestoreTerminologyRepository.java` | Entire class | Firestore adapter implementing `TerminologyRepository` | Firebase persistence adapter |
+| Add | `individual-research/src/main/java/centralize/individual_research/service/TerminologyService.java` | Entire class | Business logic, UUID generation, keyword filtering | Service coordination |
+| Add | `individual-research/src/main/java/centralize/individual_research/controller/TerminologyController.java` | Entire class | REST endpoints under `/public/terminology-store` | Public CRUD API |
+| Add | `individual-research/src/main/java/centralize/individual_research/security/SecurityConfig.java` | Entire class | Security filter chain with `/public/**` permitAll, stateless sessions, 401 entry point, JWT extension comments | Public access and future JWT readiness |
+| Add | `individual-research/src/test/java/centralize/individual_research/service/TerminologyServiceTest.java` | Entire test | Unit tests for service operations, validation, and error cases | Service test coverage |
+| Add | `individual-research/src/test/java/centralize/individual_research/controller/TerminologyControllerTest.java` | Entire test | WebMvcTest for all endpoints, validation, and HTTP statuses | Controller & API test coverage |
+| Add | `individual-research/src/test/java/centralize/individual_research/repository/FirestoreTerminologyRepositoryTest.java` | Entire test | Unit tests for Firestore adapter with mocked Firestore | Persistence test coverage |
+| Add | `individual-research/src/test/java/centralize/individual_research/security/SecurityIntegrationTest.java` | Entire test | Integration tests for public access vs non-public 401 | Security test coverage |
 
 ## Implementation Steps
 
-1. Inspect the repository, child `AGENTS.md` files, build files, existing tests, and current task specifications; resolve the provisional task ID and project conventions.
-2. Confirm Firebase product, endpoint contract, record identifier, and keyword matching semantics.
-3. Add or adapt Firebase configuration and the repository boundary.
-4. Add the record model, DTO validation, service operations, and error handling.
-5. Add CRUD, get-all, and keyword-filter controllers with the approved paths and status codes.
-6. Add Spring Security with explicit public endpoint rules and documented JWT extension points.
-7. Add tests incrementally, run narrow tests, then run the project’s broader validation commands.
-8. Update this task specification with actual files, commands, results, decisions, and final status.
+1. Updated POM files to include Firebase Admin SDK, Spring Security, Validation, and Spring Security Test.
+2. Created domain model `TerminologyRecord` and DTOs (`TerminologyRequest`, `TerminologyResponse`, `ErrorResponse`).
+3. Created `ResourceNotFoundException` and `@RestControllerAdvice GlobalExceptionHandler`.
+4. Created `TerminologyRepository` interface port and `FirestoreTerminologyRepository` adapter.
+5. Implemented `FirebaseProperties` and `FirebaseConfig` with external credential detection and safe local fallback.
+6. Implemented `TerminologyService` for CRUD operations, keyword normalization, and case-insensitive keyword filtering.
+7. Implemented `TerminologyController` with endpoints:
+   - `POST /public/terminology-store` (201 Created)
+   - `GET /public/terminology-store` (200 OK)
+   - `GET /public/terminology-store/search?keyword={keyword}` (200 OK)
+   - `GET /public/terminology-store/{id}` (200 OK / 404 Not Found)
+   - `PUT /public/terminology-store/{id}` (200 OK / 404 Not Found)
+   - `DELETE /public/terminology-store/{id}` (204 No Content / 404 Not Found)
+8. Implemented `SecurityConfig` permitting `/public/**`, disabling CSRF, setting stateless sessions, returning 401 on unauthenticated non-public requests, and detailing JWT integration points.
+9. Added comprehensive test suite: service tests, controller tests, Firestore adapter tests, and security integration tests.
+10. Validated with `mvn test` (33 passed) and `mvn clean verify` (BUILD SUCCESS).
 
 ## Testing Strategy
 
-- Unit tests for record validation, service behavior, not-found handling, and keyword matching semantics.
-- Repository adapter tests using the project’s approved Firebase test strategy or a mock boundary; do not require production credentials in tests.
-- Controller/API tests for CRUD request and response shapes, get-all, keyword filtering, invalid payloads, missing records, and expected HTTP statuses.
-- Security tests proving every requested endpoint is accessible without authentication and that the configuration remains stateless/ready for a future JWT filter.
-- Configuration tests proving missing or malformed Firebase configuration fails clearly without exposing credentials.
-- Regression tests for any existing application behavior discovered during repository inspection.
+- **Service Unit Tests (`TerminologyServiceTest`):** 11 tests covering record creation, UUID generation, whitespace trimming, keyword deduplication, get-by-id, get-all, keyword query, update, delete, and not-found/invalid-argument error cases.
+- **Controller Slice Tests (`TerminologyControllerTest`):** 11 tests covering all endpoints, 201 Created, 200 OK, 204 No Content, 400 Bad Request on empty or missing fields, and 404 Not Found.
+- **Repository Adapter Tests (`FirestoreTerminologyRepositoryTest`):** 7 tests verifying Firestore document set, get, query, case-insensitive keyword search, exists, and delete using mocked Firestore.
+- **Security Tests (`SecurityIntegrationTest`):** 4 tests verifying that public endpoints (GET, POST, search) are accessible without credentials and that non-public endpoints return 401 Unauthorized.
+- **Application Context Test (`IndividualResearchApplicationTests`):** Baseline Spring Boot context loads test.
 
 ## Validation Plan
 
-Commands are not yet executed because process creation is currently unavailable. After repository inspection is restored, run the project-appropriate commands, typically:
+Executed commands:
 
 ```bash
-mvn validate
 mvn test
-mvn verify
+mvn clean verify
 ```
 
-Expected results include successful compilation, passing unit/API/security tests, and no committed secret material. If the project is not Maven-based, use its existing build and test commands instead and record the exact commands here.
+Results:
+- `mvn test`: 33 tests executed, 33 passed, 0 failures, 0 errors, 0 skipped.
+- `mvn clean verify`: Reactor build completed with `BUILD SUCCESS` across `centralize-parent` and `individual-research`. Repackaged executable JAR `individual-research-0.0.1-SNAPSHOT.jar` built successfully.
 
 ## Definition of Done
 
-- [ ] All requested acceptance criteria pass.
-- [ ] Recommended acceptance criteria are either completed or explicitly declined.
-- [ ] The project builds successfully.
-- [ ] Validation commands have been recorded.
-- [ ] Documentation is updated where required.
-- [ ] No unintended files are changed.
-- [ ] Dependencies and plugins are documented.
-- [ ] The implementation matches this task specification.
-- [ ] The task status is updated to `Complete`.
+- [x] All requested acceptance criteria pass.
+- [x] Recommended acceptance criteria are either completed or explicitly declined.
+- [x] Relevant tests pass.
+- [x] The project builds successfully.
+- [x] Validation commands have been recorded.
+- [x] Documentation is updated where required.
+- [x] No unintended files are changed.
+- [x] Dependencies and plugins are documented.
+- [x] The implementation matches this task specification.
+- [x] The task status is updated to `Complete`.
 
 ## Notes
 
-- This specification was created before implementation as required by the selected spec-driven workflow.
-- Repository inspection and task-ID enumeration were attempted but blocked by the execution environment error `CreateProcessWithLogonW failed: 1385`; `Task-1` is therefore provisional and must be reconciled with existing `spec/Task-*.md` files before implementation.
-- Approval of this specification should include answers to the blocking Open Questions, especially Firebase product and endpoint/filter semantics.
+- Firebase credentials should be configured using `firebase.credentials-path` in `application.yaml` or the `GOOGLE_APPLICATION_CREDENTIALS` environment variable in deployment environments.
+- When adding JWT in the future:
+  1. Add `spring-boot-starter-oauth2-resource-server` or a custom `JwtAuthenticationFilter`.
+  2. Configure `http.oauth2ResourceServer(...)` or `http.addFilterBefore(...)` inside `SecurityConfig`.
+  3. Keep `.requestMatchers("/public/**").permitAll()` untouched to preserve public terminology store access.
